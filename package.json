@@ -1,5 +1,6 @@
 {
   "name": "arief-galuh-wedding",
+  "description": "Wedding Invitation Arief & Galuh - Clean Build",
   "private": true,
   "sideEffects": false,
   "type": "module",

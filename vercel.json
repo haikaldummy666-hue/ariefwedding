@@ -2,11 +2,11 @@
   "version": 2,
   "framework": "vite",
   "buildCommand": "npm run build",
-  "outputDirectory": ".output/public",
+  "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/.output/server/index.mjs"
+      "destination": "/index.html"
     }
   ]
 }

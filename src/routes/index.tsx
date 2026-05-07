@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Toaster } from "sonner";
 import { z } from "zod";
@@ -40,6 +40,13 @@ function Index() {
   const [opened, setOpened] = useState(false);
   const search = useSearch({ from: "/" }) as { admin?: string };
   const isAdmin = search.admin === "secret";
+
+  // Auto-open envelope for admin
+  useEffect(() => {
+    if (isAdmin) {
+      setOpened(true);
+    }
+  }, [isAdmin]);
 
   // Auto-scroll: Gerakan lambat dan kontinu
   useAutoScroll(opened, 0.4);

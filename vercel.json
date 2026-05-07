@@ -6,7 +6,7 @@
   "cleanUrls": true,
   "routes": [
     {
-      "src": "/(?!.*\\.[^\\s/]$)(?!_next/).*",
+      "src": "/(?!.*\\..*$).*",
       "dest": "/index.html"
     }
   ]

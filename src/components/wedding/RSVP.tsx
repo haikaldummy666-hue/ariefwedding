@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { z } from "zod";
-import { supabase } from "@/integrations/supabase/client";
 import { Reveal } from "./Reveal";
 import { toast } from "sonner";
 import { Check, X } from "lucide-react";
@@ -19,6 +18,8 @@ const schema = z.object({
   attending: z.boolean(),
 });
 
+const STORAGE_KEY = "wedding_guestbook";
+
 export function RSVP() {
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
@@ -27,30 +28,15 @@ export function RSVP() {
   const [entries, setEntries] = useState<Entry[]>([]);
 
   useEffect(() => {
-    const load = async () => {
-      const { data } = await supabase
-        .from("guestbook")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(50);
-      if (data) setEntries(data as Entry[]);
-    };
-    load();
-
-    const channel = supabase
-      .channel("guestbook-feed")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "guestbook" },
-        (payload) => {
-          setEntries((prev) => [payload.new as Entry, ...prev]);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Load entries from localStorage
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      try {
+        setEntries(JSON.parse(stored));
+      } catch (e) {
+        console.error("Failed to parse stored entries:", e);
+      }
+    }
   }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -61,12 +47,24 @@ export function RSVP() {
       return;
     }
     setSubmitting(true);
-    const { error } = await supabase.from("guestbook").insert(parsed.data);
+    
+    // Simulate a slight delay for better UX
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    const newEntry: Entry = {
+      id: Date.now().toString(),
+      name: parsed.data.name,
+      message: parsed.data.message,
+      attending: parsed.data.attending,
+      created_at: new Date().toISOString(),
+    };
+
+    // Add to entries and save to localStorage
+    const updated = [newEntry, ...entries];
+    setEntries(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+
     setSubmitting(false);
-    if (error) {
-      toast.error("Gagal mengirim pesan. Coba lagi.");
-      return;
-    }
     toast.success("Terima kasih atas doa & ucapannya!");
     setName("");
     setMessage("");

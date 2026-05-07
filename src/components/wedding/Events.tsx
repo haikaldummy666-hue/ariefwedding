@@ -1,5 +1,6 @@
 import { MapPin } from "lucide-react";
-import venue from "@/assets/wedding/p3-22.jpg";
+import akadImage from "@/assets/wedding/akad.jpeg";
+import resepsiImage from "@/assets/wedding/p3-23.jpg";
 import { Reveal } from "./Reveal";
 
 const MAPS_URL =
@@ -8,9 +9,11 @@ const MAPS_URL =
 function EventCard({
   title,
   time,
+  image,
 }: {
   title: string;
   time: string;
+  image: string;
 }) {
   return (
     <div className="rounded-lg bg-cream p-6 text-center shadow-soft">
@@ -20,7 +23,7 @@ function EventCard({
       </p>
       <p className="mt-1 text-sm text-foreground/70">{time}</p>
       <div className="my-5 overflow-hidden rounded-md">
-        <img src={venue} alt="Taman Sari Hotel & Resort" loading="lazy" className="w-full" />
+        <img src={image} alt={title} loading="lazy" className="w-full" />
       </div>
       <a
         href={MAPS_URL}
@@ -39,10 +42,10 @@ export function Events() {
     <section id="events" className="px-6 py-20 sm:py-28">
       <div className="mx-auto grid max-w-4xl gap-8 md:grid-cols-2">
         <Reveal>
-          <EventCard title="Akad" time="08.00 WIB — 10.00 WIB" />
+          <EventCard title="Akad" time="08.00 WIB — 10.00 WIB" image={akadImage} />
         </Reveal>
         <Reveal delay={0.15}>
-          <EventCard title="Resepsi" time="11.00 WIB — 14.00 WIB" />
+          <EventCard title="Resepsi" time="11.00 WIB — 14.00 WIB" image={resepsiImage} />
         </Reveal>
       </div>
     </section>

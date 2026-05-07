@@ -56,34 +56,39 @@ function Index() {
       <Loader />
       <Toaster position="top-center" richColors />
 
-      <AnimatePresence>
-        {!opened && <EnvelopeCover key="cover" onOpen={() => setOpened(true)} />}
-      </AnimatePresence>
-
-      {opened && (
+      {isAdmin ? (
+        <div className="min-h-screen flex items-center justify-center px-6 py-20">
+          <div className="w-full max-w-2xl">
+            <h1 className="text-center font-script text-5xl text-sage mb-10">Link Generator (Admin Only)</h1>
+            <LinkGenerator />
+          </div>
+        </div>
+      ) : (
         <>
-          <PetalFall />
-          <MusicPlayer autoStart />
-          <Nav />
-          <main className="relative z-10">
-            <Welcome />
-            {isAdmin && (
-              <div className="mx-auto max-w-4xl px-6 py-10 bg-white shadow-lg rounded-2xl my-10">
-                <h2 className="text-2xl font-script text-sage mb-6 text-center">Link Generator (Admin Only)</h2>
-                <LinkGenerator />
-              </div>
-            )}
-            <OurStory />
-            <Couple />
-            <CalendarSection />
-            <Events />
-            <Dresscode />
-            <RSVP />
-            <Gift />
-            <Countdown />
-            <Gallery />
-          </main>
-          <Footer />
+          <AnimatePresence>
+            {!opened && <EnvelopeCover key="cover" onOpen={() => setOpened(true)} />}
+          </AnimatePresence>
+
+          {opened && (
+            <>
+              <PetalFall />
+              <MusicPlayer autoStart />
+              <Nav />
+              <main className="relative z-10">
+                <Welcome />
+                <OurStory />
+                <Couple />
+                <CalendarSection />
+                <Events />
+                <Dresscode />
+                <RSVP />
+                <Gift />
+                <Countdown />
+                <Gallery />
+              </main>
+              <Footer />
+            </>
+          )}
         </>
       )}
     </div>

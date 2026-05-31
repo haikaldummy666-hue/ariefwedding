@@ -10,11 +10,23 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as GenerateLinksRouteImport } from './routes/generate-links'
+import { Route as CheckInRouteImport } from './routes/check-in'
+import { Route as AttendanceReportRouteImport } from './routes/attendance-report'
 import { Route as IndexRouteImport } from './routes/index'
 
 const GenerateLinksRoute = GenerateLinksRouteImport.update({
   id: '/generate-links',
   path: '/generate-links',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CheckInRoute = CheckInRouteImport.update({
+  id: '/check-in',
+  path: '/check-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AttendanceReportRoute = AttendanceReportRouteImport.update({
+  id: '/attendance-report',
+  path: '/attendance-report',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -25,27 +37,35 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/attendance-report': typeof AttendanceReportRoute
+  '/check-in': typeof CheckInRoute
   '/generate-links': typeof GenerateLinksRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/attendance-report': typeof AttendanceReportRoute
+  '/check-in': typeof CheckInRoute
   '/generate-links': typeof GenerateLinksRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/attendance-report': typeof AttendanceReportRoute
+  '/check-in': typeof CheckInRoute
   '/generate-links': typeof GenerateLinksRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/generate-links'
+  fullPaths: '/' | '/attendance-report' | '/check-in' | '/generate-links'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/generate-links'
-  id: '__root__' | '/' | '/generate-links'
+  to: '/' | '/attendance-report' | '/check-in' | '/generate-links'
+  id: '__root__' | '/' | '/attendance-report' | '/check-in' | '/generate-links'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AttendanceReportRoute: typeof AttendanceReportRoute
+  CheckInRoute: typeof CheckInRoute
   GenerateLinksRoute: typeof GenerateLinksRoute
 }
 
@@ -56,6 +76,20 @@ declare module '@tanstack/react-router' {
       path: '/generate-links'
       fullPath: '/generate-links'
       preLoaderRoute: typeof GenerateLinksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/check-in': {
+      id: '/check-in'
+      path: '/check-in'
+      fullPath: '/check-in'
+      preLoaderRoute: typeof CheckInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/attendance-report': {
+      id: '/attendance-report'
+      path: '/attendance-report'
+      fullPath: '/attendance-report'
+      preLoaderRoute: typeof AttendanceReportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -70,6 +104,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AttendanceReportRoute: AttendanceReportRoute,
+  CheckInRoute: CheckInRoute,
   GenerateLinksRoute: GenerateLinksRoute,
 }
 export const routeTree = rootRouteImport

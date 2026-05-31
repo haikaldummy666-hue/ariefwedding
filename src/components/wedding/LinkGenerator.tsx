@@ -32,14 +32,14 @@ export function LinkGenerator() {
     const link = `${baseUrl}?to=${encodedName}&v=1`;
     
     const message = `Kepada Yth.
-${guestName}
+*${guestName}*
 
 Assalamualaikum warahmatullahi wabarakatuh
 
 Dengan memohon rahmat dan ridha Allah SWT, kami bermaksud mengundang Bapak/Ibu/Saudara/i untuk hadir di hari bahagia kami.
 
 Untuk mengetahui detail acara, silakan membuka tautan undangan berikut:
-${link}
+(${link})
 
 Merupakan suatu kehormatan dan kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir serta memberikan doa restu kepada kami.
 
@@ -48,7 +48,7 @@ Atas perhatian, kehadiran, dan doa yang diberikan, kami mengucapkan terima kasih
 Wassalamualaikum warahmatullahi wabarakatuh
 
 Kami yang berbahagia,
-Galuh & Arief`;
+*Galuh & Arief*`;
 
     setGeneratedMessage(message);
     setMessageCopied(false);

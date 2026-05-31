@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { CheckCircle2, AlertCircle, X, PartyPopper } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { decodeBarcodeData, formatDateTime } from '@/lib/barcode-utils';
 import { BarcodeScanner } from './BarcodeScanner';
@@ -13,11 +13,12 @@ interface CheckedInGuest {
 }
 
 export function CheckInPanel() {
-  const [isScanning, setIsScanning] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [checkedInGuests, setCheckedInGuests] = useState<CheckedInGuest[]>([]);
   const [lastCheckedIn, setLastCheckedIn] = useState<CheckedInGuest | null>(null);
   const [guestNotFound, setGuestNotFound] = useState<string | null>(null);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [successGuestName, setSuccessGuestName] = useState('');
 
   useEffect(() => {
     loadCheckedInGuests();
@@ -38,9 +39,9 @@ export function CheckInPanel() {
       if (error) throw error;
 
       setCheckedInGuests(
-        data.map((item: any) => ({
+        (data || []).map((item: any) => ({
           id: item.id,
-          name: item.guests.name,
+          name: item.guests?.name || 'Unknown',
           timestamp: item.checked_in_at,
         }))
       );
@@ -49,27 +50,37 @@ export function CheckInPanel() {
     }
   };
 
-  const handleScan = async (scannedData: string) => {
+  const handleScan = useCallback(async (scannedData: string) => {
+    if (isProcessing) return;
     setIsProcessing(true);
     setGuestNotFound(null);
 
     try {
-      // Try to decode QR code data (format: GUEST|BARCODE_ID|NAME|TIMESTAMP)
+      // Step 1: Decode QR data (format: GUEST|BARCODE_ID|NAME|TIMESTAMP)
       const decoded = decodeBarcodeData(scannedData);
-      
-      // Extract the barcode_id: from QR decode or use raw scanned text
-      const barcodeId = decoded ? decoded.guestId : scannedData;
+      const barcodeId = decoded ? decoded.guestId : scannedData.trim();
 
-      // Always look up the guest by barcode_id in database
+      console.log('[CheckIn] Scanned data:', scannedData);
+      console.log('[CheckIn] Decoded barcode_id:', barcodeId);
+
+      // Step 2: Find guest in database by barcode_id
       const { data: guestData, error: lookupError } = await supabase
         .from('guests')
         .select('id, name')
         .eq('barcode_id', barcodeId)
-        .single();
+        .maybeSingle();
 
-      if (lookupError || !guestData) {
+      console.log('[CheckIn] Guest lookup result:', guestData, lookupError);
+
+      if (lookupError) {
+        toast.error(`Database error: ${lookupError.message}`);
+        setIsProcessing(false);
+        return;
+      }
+
+      if (!guestData) {
         setGuestNotFound(barcodeId);
-        toast.error(`Tamu tidak ditemukan (ID: ${barcodeId})`);
+        toast.error(`Tamu dengan ID "${barcodeId}" tidak ditemukan di database`);
         setIsProcessing(false);
         return;
       }
@@ -77,7 +88,7 @@ export function CheckInPanel() {
       const guestId = guestData.id;
       const guestName = guestData.name;
 
-      // Check if already checked in today
+      // Step 3: Check if already checked in today
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
@@ -90,22 +101,26 @@ export function CheckInPanel() {
 
       if (existingCheckin) {
         toast.info(`${guestName} sudah tercatat hadir hari ini`);
+        // Still show success popup since the scan worked
+        setSuccessGuestName(guestName);
+        setShowSuccessPopup(true);
+        setTimeout(() => setShowSuccessPopup(false), 4000);
         setIsProcessing(false);
         return;
       }
 
-      // Record attendance
+      // Step 4: Record attendance
       const { error: attendanceError } = await supabase
         .from('attendance')
-        .insert([
-          {
-            guest_id: guestId,
-            checked_in_at: new Date().toISOString(),
-          },
-        ]);
+        .insert([{ guest_id: guestId }]);
 
-      if (attendanceError) throw attendanceError;
+      if (attendanceError) {
+        toast.error(`Gagal mencatat kehadiran: ${attendanceError.message}`);
+        setIsProcessing(false);
+        return;
+      }
 
+      // Step 5: Success!
       const newCheckin: CheckedInGuest = {
         id: guestId,
         name: guestName,
@@ -114,30 +129,22 @@ export function CheckInPanel() {
 
       setLastCheckedIn(newCheckin);
       setCheckedInGuests((prev) => [newCheckin, ...prev]);
+
+      // Show success popup
+      setSuccessGuestName(guestName);
+      setShowSuccessPopup(true);
       toast.success(`${guestName} berhasil check-in!`);
 
-      // Play success sound
-      playSuccessSound();
-    } catch (error) {
-      console.error('Error processing scan:', error);
-      toast.error('Gagal memproses scan');
+      // Auto-hide popup after 4 seconds
+      setTimeout(() => setShowSuccessPopup(false), 4000);
+
+    } catch (error: any) {
+      console.error('[CheckIn] Error:', error);
+      toast.error(`Error: ${error.message || 'Gagal memproses scan'}`);
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const playSuccessSound = () => {
-    try {
-      const audio = new Audio(
-        'data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQIAAAAAAA=='
-      );
-      audio.play().catch(() => {
-        // Silent fail if audio can't play
-      });
-    } catch {
-      // Silent fail
-    }
-  };
+  }, [isProcessing]);
 
   const exportAttendanceCSV = () => {
     if (checkedInGuests.length === 0) {
@@ -168,7 +175,53 @@ export function CheckInPanel() {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 relative">
+      {/* ========== SUCCESS POPUP MODAL ========== */}
+      {showSuccessPopup && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 mx-4 max-w-md w-full text-center relative animate-in zoom-in-95 duration-300">
+            <button
+              onClick={() => setShowSuccessPopup(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 className="w-12 h-12 text-green-600" />
+            </div>
+
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <PartyPopper className="w-6 h-6 text-yellow-500" />
+              <h2 className="text-2xl font-bold text-green-700">Check-in Berhasil!</h2>
+              <PartyPopper className="w-6 h-6 text-yellow-500" />
+            </div>
+
+            <p className="text-gray-600 mb-2">Tamu atas nama</p>
+            <p className="text-3xl font-bold text-sage mb-4 font-serif">
+              {successGuestName}
+            </p>
+            <p className="text-green-600 font-medium text-lg mb-1">
+              ✅ Sudah berhasil hadir / terscan!
+            </p>
+            <p className="text-gray-400 text-sm">
+              {new Date().toLocaleString('id-ID', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </p>
+
+            <div className="mt-6 w-full h-1.5 bg-green-100 rounded-full overflow-hidden">
+              <div className="h-full bg-green-500 rounded-full animate-[shrink_4s_linear_forwards]" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Scanner Section */}
       <div className="lg:col-span-2 space-y-6">
         <div className="bg-white p-6 rounded-2xl shadow-xl border border-sage/20">
@@ -183,13 +236,13 @@ export function CheckInPanel() {
         </div>
 
         {/* Last Check-in Alert */}
-        {lastCheckedIn && (
-          <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded-lg animate-in slide-in-from-top">
+        {lastCheckedIn && !showSuccessPopup && (
+          <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded-lg">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" />
               <div>
                 <h3 className="font-semibold text-green-900 mb-1">
-                  Check-in Berhasil!
+                  Check-in Terakhir Berhasil!
                 </h3>
                 <p className="text-sm text-green-700 mb-1">
                   <span className="font-semibold">{lastCheckedIn.name}</span> berhasil
@@ -205,7 +258,7 @@ export function CheckInPanel() {
 
         {/* Not Found Alert */}
         {guestNotFound && (
-          <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg animate-in slide-in-from-top">
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg">
             <div className="flex items-start gap-3">
               <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
               <div>
@@ -254,7 +307,7 @@ export function CheckInPanel() {
             ) : (
               checkedInGuests.slice(0, 10).map((guest, index) => (
                 <div
-                  key={guest.id}
+                  key={`${guest.id}-${guest.timestamp}`}
                   className="flex items-start justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                 >
                   <div>

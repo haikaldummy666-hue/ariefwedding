@@ -1,19 +1,12 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import jsQR from 'jsqr';
 import { toast } from 'sonner';
-import { Loader2, AlertCircle, Activity, Camera } from 'lucide-react';
-import cv from '@techstark/opencv-js';
+import { AlertCircle, Camera } from 'lucide-react';
 
 interface BarcodeScannerProps {
   onScan: (decodedText: string) => void;
   onError?: (error: string) => void;
   isLoading?: boolean;
-}
-
-interface ScanMetrics {
-  fps: number;
-  detectionRate: number;
-  averageTime: number;
 }
 
 export function BarcodeScanner({
@@ -25,46 +18,39 @@ export function BarcodeScanner({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [hasError, setHasError] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
-  const [metrics, setMetrics] = useState<ScanMetrics>({ fps: 0, detectionRate: 0, averageTime: 0 });
-  
+  const [scanStatus, setScanStatus] = useState<'idle' | 'ready' | 'detected'>('idle');
+
+  // Use refs to avoid stale closure issues in requestAnimationFrame loop
+  const onScanRef = useRef(onScan);
+  onScanRef.current = onScan;
+
   const lastScanRef = useRef<string | null>(null);
-  const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const scanAnimationFrame = useRef<number | null>(null);
-  
-  const frameCountRef = useRef<number>(0);
-  const lastTimeRef = useRef<number>(Date.now());
-  const detectionCountRef = useRef<number>(0);
-  const scanTimesRef = useRef<number[]>([]);
+  const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const isProcessingRef = useRef(false);
 
-  // Play beep sound
-  const playBeep = (frequency = 1000, duration = 200) => {
+  // Play beep sound on successful scan
+  const playBeep = () => {
     try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-
-      oscillator.frequency.value = frequency;
-      oscillator.type = 'sine';
-
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration / 1000);
-
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + duration / 1000);
-    } catch (error) {
-      console.debug('Beep sound failed:', error);
-    }
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 1500;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
+    } catch { /* silent */ }
   };
 
   const startCamera = async () => {
     try {
       setHasError(false);
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
       });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -81,123 +67,116 @@ export function BarcodeScanner({
 
   useEffect(() => {
     startCamera();
-
     return () => {
-      if (scanTimeoutRef.current) {
-        clearTimeout(scanTimeoutRef.current);
-      }
-      if (scanAnimationFrame.current) {
-        cancelAnimationFrame(scanAnimationFrame.current);
-      }
+      if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
+        (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
       }
     };
   }, []);
 
-  const processFrame = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current || videoRef.current.readyState !== videoRef.current.HAVE_ENOUGH_DATA) {
-      scanAnimationFrame.current = requestAnimationFrame(processFrame);
+  // Core scanning loop
+  const processFrame = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
+      animFrameRef.current = requestAnimationFrame(processFrame);
       return;
     }
 
-    const startTime = performance.now();
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    
-    if (!ctx) return;
+    if (!ctx) {
+      animFrameRef.current = requestAnimationFrame(processFrame);
+      return;
+    }
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    detectionCountRef.current++;
 
-    try {
-      // OpenCV Image Preprocessing
-      const src = cv.matFromImageData(imageData);
-      const dst = new cv.Mat();
-      
-      // 1. Convert to Grayscale
-      cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY, 0);
-      
-      // 2. Histogram Equalization for better contrast
-      cv.equalizeHist(dst, dst);
-      
-      // 3. Gaussian Blur to reduce noise
-      cv.GaussianBlur(dst, dst, new cv.Size(3, 3), 0, 0, cv.BORDER_DEFAULT);
+    // Strategy 1: Try raw image first (fastest & most reliable for clean QR codes)
+    let code = jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: 'dontInvert',
+    });
 
-      // Convert back to RGBA to feed into jsQR
-      const rgba = new cv.Mat();
-      cv.cvtColor(dst, rgba, cv.COLOR_GRAY2RGBA, 0);
-      
-      const processedImgData = new ImageData(
-        new Uint8ClampedArray(rgba.data),
-        rgba.cols,
-        rgba.rows
-      );
+    // Strategy 2: If raw fails, try with OpenCV preprocessing
+    if (!code) {
+      try {
+        const cv = (window as any).cv;
+        if (cv && cv.matFromImageData) {
+          const src = cv.matFromImageData(imageData);
+          const gray = new cv.Mat();
+          const enhanced = new cv.Mat();
 
-      // Scan with jsQR
-      const code = jsQR(processedImgData.data, processedImgData.width, processedImgData.height, {
-        inversionAttempts: "dontInvert",
-      });
+          // Convert to grayscale
+          cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
 
-      const scanTime = performance.now() - startTime;
-      scanTimesRef.current.push(scanTime);
-      if (scanTimesRef.current.length > 30) {
-        scanTimesRef.current.shift();
-      }
+          // Adaptive threshold for better QR detection in poor lighting
+          cv.adaptiveThreshold(gray, enhanced, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 51, 10);
 
-      frameCountRef.current++;
-      if (frameCountRef.current % 30 === 0) {
-        const now = Date.now();
-        const elapsed = now - lastTimeRef.current;
-        const fps = Math.round((30 / elapsed) * 1000);
-        const averageTime = scanTimesRef.current.reduce((a, b) => a + b, 0) / scanTimesRef.current.length;
-        const detectionRate = Math.round((detectionCountRef.current / frameCountRef.current) * 100);
+          // Convert back to RGBA for jsQR
+          const rgba = new cv.Mat();
+          cv.cvtColor(enhanced, rgba, cv.COLOR_GRAY2RGBA, 0);
 
-        setMetrics({ fps, detectionRate, averageTime });
-        lastTimeRef.current = now;
-      }
+          const processedData = new ImageData(
+            new Uint8ClampedArray(rgba.data),
+            rgba.cols,
+            rgba.rows
+          );
 
-      if (code && lastScanRef.current !== code.data) {
-        lastScanRef.current = code.data;
-        setIsScanning(true);
-        playBeep(1500, 100);
-        
-        onScan(code.data);
+          code = jsQR(processedData.data, processedData.width, processedData.height, {
+            inversionAttempts: 'attemptBoth',
+          });
 
-        if (scanTimeoutRef.current) {
-          clearTimeout(scanTimeoutRef.current);
+          // Clean up OpenCV memory
+          src.delete();
+          gray.delete();
+          enhanced.delete();
+          rgba.delete();
         }
-
-        // Wait 10 seconds before allowing the same code to be scanned again
-        scanTimeoutRef.current = setTimeout(() => {
-          lastScanRef.current = null;
-          setIsScanning(false);
-        }, 10000);
+      } catch {
+        // OpenCV not ready or failed - that's ok, raw scan might still work next frame
       }
-
-      // Clean up OpenCV memory
-      src.delete();
-      dst.delete();
-      rgba.delete();
-
-    } catch (error) {
-      // Silently handle processing errors to keep stream running
-      // console.debug('OpenCV processing error:', error);
     }
 
-    scanAnimationFrame.current = requestAnimationFrame(processFrame);
-  }, [onScan]);
+    // Process detected QR code
+    if (code && code.data && !isProcessingRef.current) {
+      // Only process if it's a new code (different from last scan)
+      if (lastScanRef.current !== code.data) {
+        isProcessingRef.current = true;
+        lastScanRef.current = code.data;
+        setScanStatus('detected');
+        playBeep();
+
+        // Call the parent handler via ref (avoids stale closure!)
+        try {
+          onScanRef.current(code.data);
+        } catch (err) {
+          console.error('onScan callback error:', err);
+        }
+
+        // Cooldown: prevent re-scanning same code for 8 seconds
+        if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+        scanTimeoutRef.current = setTimeout(() => {
+          lastScanRef.current = null;
+          isProcessingRef.current = false;
+          setScanStatus('ready');
+        }, 8000);
+      }
+    }
+
+    animFrameRef.current = requestAnimationFrame(processFrame);
+  };
 
   const handleVideoPlay = () => {
     setIsInitialized(true);
-    if (!scanAnimationFrame.current) {
-      scanAnimationFrame.current = requestAnimationFrame(processFrame);
+    setScanStatus('ready');
+    if (!animFrameRef.current) {
+      animFrameRef.current = requestAnimationFrame(processFrame);
     }
   };
 
@@ -205,9 +184,7 @@ export function BarcodeScanner({
     return (
       <div className="flex flex-col items-center justify-center p-8 rounded-lg border-2 border-red-200 bg-red-50">
         <AlertCircle className="w-12 h-12 text-red-500 mb-3" />
-        <h3 className="text-lg font-semibold text-red-900 mb-2">
-          Gagal Akses Kamera
-        </h3>
+        <h3 className="text-lg font-semibold text-red-900 mb-2">Gagal Akses Kamera</h3>
         <p className="text-sm text-red-700 text-center mb-4">
           Browser tidak dapat mengakses kamera. Pastikan:
         </p>
@@ -228,115 +205,83 @@ export function BarcodeScanner({
 
   return (
     <div className="w-full space-y-4">
-      {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg z-50">
-          <div className="flex flex-col items-center gap-2">
-            <Loader2 className="w-8 h-8 text-white animate-spin" />
-            <p className="text-white text-sm">Memproses data...</p>
-          </div>
-        </div>
-      )}
-
-      {/* Performance Metrics */}
-      <div className="grid grid-cols-3 gap-2 p-3 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
-        <div className="text-center">
-          <div className="text-2xl font-bold text-blue-600">{metrics.fps}</div>
-          <div className="text-xs text-blue-700">FPS</div>
-        </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-purple-600">{metrics.detectionRate}%</div>
-          <div className="text-xs text-purple-700">Detection</div>
-        </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-green-600">{metrics.averageTime.toFixed(0)}ms</div>
-          <div className="text-xs text-green-700">Avg Time</div>
-        </div>
-      </div>
-
-      {/* Scanning Indicator */}
-      <div className={`flex items-center justify-center gap-2 p-3 rounded-lg ${
-        isScanning 
-          ? 'bg-green-50 border border-green-300' 
+      {/* Scanning Status */}
+      <div className={`flex items-center justify-center gap-2 p-3 rounded-lg transition-colors ${
+        scanStatus === 'detected'
+          ? 'bg-green-100 border border-green-400'
           : 'bg-blue-50 border border-blue-200'
       }`}>
-        <Activity className={`w-5 h-5 ${isScanning ? 'text-green-600' : 'text-blue-400'}`} />
-        <span className={`text-sm font-medium ${isScanning ? 'text-green-900' : 'text-blue-900'}`}>
-          {isScanning ? '✅ QR Code Terdeteksi! Sedang diproses...' : (isInitialized ? '📷 Siap scan — Arahkan QR Code ke kamera' : '⏳ Menghubungkan Kamera...')}
+        <span className={`text-sm font-medium ${
+          scanStatus === 'detected' ? 'text-green-800' : 'text-blue-800'
+        }`}>
+          {scanStatus === 'idle' && '⏳ Menghubungkan Kamera...'}
+          {scanStatus === 'ready' && '📷 Siap scan — Arahkan QR Code ke kamera'}
+          {scanStatus === 'detected' && '✅ QR Code Terdeteksi!'}
         </span>
       </div>
 
-      {/* Camera Scanner */}
-      <div className="w-full rounded-lg overflow-hidden border-4 border-sage/30 shadow-lg relative bg-black flex justify-center aspect-video sm:aspect-[4/3]">
+      {/* Camera + Overlay */}
+      <div className="w-full rounded-lg overflow-hidden border-4 border-sage/30 shadow-lg relative bg-black aspect-[4/3]">
         {!isInitialized && !hasError && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
             <Camera className="w-12 h-12 text-gray-500 animate-pulse" />
           </div>
         )}
-        <video 
-          ref={videoRef} 
+        <video
+          ref={videoRef}
           onPlay={handleVideoPlay}
-          className="absolute inset-0 w-full h-full object-cover" 
-          playsInline 
-          muted 
+          className="absolute inset-0 w-full h-full object-cover"
+          playsInline
+          muted
         />
         <canvas ref={canvasRef} className="hidden" />
-        
+
         {/* Scanning Box Overlay */}
         {isInitialized && (
           <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
-            {/* Darkened outside area using a border trick or box-shadow */}
-            <div 
-              className="absolute inset-0" 
-              style={{
-                boxShadow: 'inset 0 0 0 9999px rgba(0, 0, 0, 0.5)'
-              }}
+            <div
+              className="absolute inset-0"
+              style={{ boxShadow: 'inset 0 0 0 9999px rgba(0, 0, 0, 0.5)' }}
             />
-            {/* Clear target box */}
-            <div 
-              className="relative w-64 h-64 sm:w-72 sm:h-72 border-2 border-white rounded-xl flex items-center justify-center shadow-[0_0_0_9999px_rgba(0,0,0,0.5)] overflow-hidden"
+            <div
+              className={`relative w-64 h-64 sm:w-72 sm:h-72 border-2 rounded-xl flex items-center justify-center shadow-[0_0_0_9999px_rgba(0,0,0,0.5)] overflow-hidden transition-colors ${
+                scanStatus === 'detected' ? 'border-green-400' : 'border-white'
+              }`}
             >
               {/* Corner brackets */}
-              <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-green-400 rounded-tl-lg" />
-              <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-green-400 rounded-tr-lg" />
-              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-green-400 rounded-bl-lg" />
-              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-green-400 rounded-br-lg" />
-              
+              <div className={`absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 rounded-tl-lg ${scanStatus === 'detected' ? 'border-green-400' : 'border-green-400'}`} />
+              <div className={`absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 rounded-tr-lg ${scanStatus === 'detected' ? 'border-green-400' : 'border-green-400'}`} />
+              <div className={`absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 rounded-bl-lg ${scanStatus === 'detected' ? 'border-green-400' : 'border-green-400'}`} />
+              <div className={`absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 rounded-br-lg ${scanStatus === 'detected' ? 'border-green-400' : 'border-green-400'}`} />
+
               {/* Scanning laser line */}
-              <div className="w-full h-0.5 bg-green-500/80 shadow-[0_0_8px_2px_rgba(34,197,94,0.5)] animate-[scan_2s_ease-in-out_infinite]" />
+              {scanStatus === 'ready' && (
+                <div className="w-full h-0.5 bg-green-500/80 shadow-[0_0_8px_2px_rgba(34,197,94,0.5)] animate-[scan_2s_ease-in-out_infinite]" />
+              )}
+
+              {/* Success check overlay */}
+              {scanStatus === 'detected' && (
+                <div className="text-green-400 text-6xl">✓</div>
+              )}
             </div>
-            
+
             <div className="absolute bottom-6 left-0 right-0 text-center">
               <p className="text-white text-sm font-medium drop-shadow-md bg-black/40 inline-block px-4 py-1.5 rounded-full">
-                Arahkan QR Code ke dalam kotak
+                {scanStatus === 'detected' ? 'QR Code berhasil dipindai!' : 'Arahkan QR Code ke dalam kotak'}
               </p>
             </div>
           </div>
         )}
       </div>
 
-      {/* Advanced Features Notice */}
-      <div className="text-center text-sm space-y-2 bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-lg border border-green-200">
-        <p className="font-semibold text-green-900">⚡ Teknologi OpenCV Aktif</p>
-        <ul className="text-xs text-green-800 space-y-1">
-          <li>✨ OpenCV Grayscale Conversion</li>
-          <li>🎯 OpenCV Histogram Equalization</li>
-          <li>📡 OpenCV Gaussian Blur Noise Reduction</li>
-          <li>⚙️ Direct Browser Camera API</li>
-        </ul>
-        <p className="text-xs text-green-700 mt-3 font-medium">
-          💻 Jarak ideal: 10-30cm | Pencahayaan: Cukup terang | Hasil: Instant detection
-        </p>
-      </div>
-
-      {/* Instructions */}
+      {/* Tips */}
       <div className="text-center text-sm space-y-2 bg-amber-50 p-4 rounded-lg border border-amber-200">
-        <p className="font-medium text-amber-900">📸 Tips Pemindaian Optimal</p>
+        <p className="font-medium text-amber-900">📸 Tips Pemindaian</p>
         <ul className="text-xs text-amber-800 space-y-1">
-          <li>✓ Arahkan kamera langsung ke barcode/QR code</li>
+          <li>✓ Arahkan kamera langsung ke QR code</li>
           <li>✓ Pastikan pencahayaan cukup terang</li>
-          <li>✓ Jarak ideal: 10-30cm dari barcode</li>
-          <li>✓ Scanning otomatis & akurat (tidak perlu tombol)</li>
-          <li>✓ Sistem akan langsung mendeteksi dan memproses</li>
+          <li>✓ Jarak ideal: 10-30cm dari QR code</li>
+          <li>✓ Scanning otomatis tanpa perlu tombol</li>
         </ul>
       </div>
     </div>

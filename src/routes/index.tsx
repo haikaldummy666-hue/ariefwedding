@@ -25,7 +25,6 @@ import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import { LinkGenerator } from "@/components/wedding/LinkGenerator";
 import { GuestGenerator } from "@/components/wedding/GuestGenerator";
 import { Button } from "@/components/ui/button";
-
 import { useSearch, useNavigate } from "@tanstack/react-router";
 
 const guestSearchSchema = z.object({

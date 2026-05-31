@@ -54,30 +54,28 @@ export function CheckInPanel() {
     setGuestNotFound(null);
 
     try {
-      // Try to decode barcode data
+      // Try to decode QR code data (format: GUEST|BARCODE_ID|NAME|TIMESTAMP)
       const decoded = decodeBarcodeData(scannedData);
-      let guestId: string | null = null;
+      
+      // Extract the barcode_id: from QR decode or use raw scanned text
+      const barcodeId = decoded ? decoded.guestId : scannedData;
 
-      if (decoded) {
-        // QR Code scanned
-        guestId = decoded.guestId;
-      } else {
-        // Plain barcode ID scanned
-        const { data, error } = await supabase
-          .from('guests')
-          .select('id, name')
-          .eq('barcode_id', scannedData)
-          .single();
+      // Always look up the guest by barcode_id in database
+      const { data: guestData, error: lookupError } = await supabase
+        .from('guests')
+        .select('id, name')
+        .eq('barcode_id', barcodeId)
+        .single();
 
-        if (error || !data) {
-          setGuestNotFound(scannedData);
-          toast.error('Tamu tidak ditemukan');
-          setIsProcessing(false);
-          return;
-        }
-
-        guestId = data.id;
+      if (lookupError || !guestData) {
+        setGuestNotFound(barcodeId);
+        toast.error(`Tamu tidak ditemukan (ID: ${barcodeId})`);
+        setIsProcessing(false);
+        return;
       }
+
+      const guestId = guestData.id;
+      const guestName = guestData.name;
 
       // Check if already checked in today
       const today = new Date();
@@ -88,22 +86,13 @@ export function CheckInPanel() {
         .select('id')
         .eq('guest_id', guestId)
         .gte('checked_in_at', today.toISOString())
-        .single();
+        .maybeSingle();
 
       if (existingCheckin) {
-        toast.error('Tamu sudah tercatat hadir hari ini');
+        toast.info(`${guestName} sudah tercatat hadir hari ini`);
         setIsProcessing(false);
         return;
       }
-
-      // Get guest info
-      const { data: guest } = await supabase
-        .from('guests')
-        .select('name')
-        .eq('id', guestId)
-        .single();
-
-      if (!guest) throw new Error('Guest not found');
 
       // Record attendance
       const { error: attendanceError } = await supabase
@@ -119,13 +108,13 @@ export function CheckInPanel() {
 
       const newCheckin: CheckedInGuest = {
         id: guestId,
-        name: guest.name,
+        name: guestName,
         timestamp: new Date().toISOString(),
       };
 
       setLastCheckedIn(newCheckin);
       setCheckedInGuests((prev) => [newCheckin, ...prev]);
-      toast.success(`${guest.name} berhasil check-in!`);
+      toast.success(`${guestName} berhasil check-in!`);
 
       // Play success sound
       playSuccessSound();

@@ -174,10 +174,11 @@ export function BarcodeScanner({
           clearTimeout(scanTimeoutRef.current);
         }
 
+        // Wait 10 seconds before allowing the same code to be scanned again
         scanTimeoutRef.current = setTimeout(() => {
           lastScanRef.current = null;
           setIsScanning(false);
-        }, 1500);
+        }, 10000);
       }
 
       // Clean up OpenCV memory
@@ -253,10 +254,14 @@ export function BarcodeScanner({
       </div>
 
       {/* Scanning Indicator */}
-      <div className="flex items-center justify-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-        <Activity className={`w-5 h-5 ${isScanning ? 'text-blue-600 animate-pulse' : 'text-blue-400'}`} />
-        <span className="text-sm font-medium text-blue-900">
-          {isScanning ? '🔄 Memproses scan...' : (isInitialized ? '✅ Siap scan (OpenCV Active)' : 'Menghubungkan Kamera...')}
+      <div className={`flex items-center justify-center gap-2 p-3 rounded-lg ${
+        isScanning 
+          ? 'bg-green-50 border border-green-300' 
+          : 'bg-blue-50 border border-blue-200'
+      }`}>
+        <Activity className={`w-5 h-5 ${isScanning ? 'text-green-600' : 'text-blue-400'}`} />
+        <span className={`text-sm font-medium ${isScanning ? 'text-green-900' : 'text-blue-900'}`}>
+          {isScanning ? '✅ QR Code Terdeteksi! Sedang diproses...' : (isInitialized ? '📷 Siap scan — Arahkan QR Code ke kamera' : '⏳ Menghubungkan Kamera...')}
         </span>
       </div>
 

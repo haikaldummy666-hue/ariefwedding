@@ -261,7 +261,7 @@ export function BarcodeScanner({
       </div>
 
       {/* Camera Scanner */}
-      <div className="w-full rounded-lg overflow-hidden border-4 border-sage/30 shadow-lg relative bg-black flex justify-center">
+      <div className="w-full rounded-lg overflow-hidden border-4 border-sage/30 shadow-lg relative bg-black flex justify-center aspect-video sm:aspect-[4/3]">
         {!isInitialized && !hasError && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
             <Camera className="w-12 h-12 text-gray-500 animate-pulse" />
@@ -270,11 +270,43 @@ export function BarcodeScanner({
         <video 
           ref={videoRef} 
           onPlay={handleVideoPlay}
-          className="w-full max-w-full h-auto object-cover" 
+          className="absolute inset-0 w-full h-full object-cover" 
           playsInline 
           muted 
         />
         <canvas ref={canvasRef} className="hidden" />
+        
+        {/* Scanning Box Overlay */}
+        {isInitialized && (
+          <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
+            {/* Darkened outside area using a border trick or box-shadow */}
+            <div 
+              className="absolute inset-0" 
+              style={{
+                boxShadow: 'inset 0 0 0 9999px rgba(0, 0, 0, 0.5)'
+              }}
+            />
+            {/* Clear target box */}
+            <div 
+              className="relative w-64 h-64 sm:w-72 sm:h-72 border-2 border-white rounded-xl flex items-center justify-center shadow-[0_0_0_9999px_rgba(0,0,0,0.5)] overflow-hidden"
+            >
+              {/* Corner brackets */}
+              <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-green-400 rounded-tl-lg" />
+              <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-green-400 rounded-tr-lg" />
+              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-green-400 rounded-bl-lg" />
+              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-green-400 rounded-br-lg" />
+              
+              {/* Scanning laser line */}
+              <div className="w-full h-0.5 bg-green-500/80 shadow-[0_0_8px_2px_rgba(34,197,94,0.5)] animate-[scan_2s_ease-in-out_infinite]" />
+            </div>
+            
+            <div className="absolute bottom-6 left-0 right-0 text-center">
+              <p className="text-white text-sm font-medium drop-shadow-md bg-black/40 inline-block px-4 py-1.5 rounded-full">
+                Arahkan QR Code ke dalam kotak
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Advanced Features Notice */}

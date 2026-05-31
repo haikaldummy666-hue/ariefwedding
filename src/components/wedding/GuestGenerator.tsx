@@ -80,7 +80,7 @@ export function GuestGenerator() {
   };
 
   const downloadBarcodeImage = (guest: GeneratedGuest) => {
-    const svg = document.querySelector(`svg[data-guest-id="${guest.id}"]`) as SVGElement;
+    const svg = document.querySelector(`div[data-guest-id="${guest.id}"] svg`) as SVGElement;
     if (svg) {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
@@ -96,6 +96,20 @@ export function GuestGenerator() {
         link.click();
       };
       img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
+    } else {
+      toast.error('Gagal mengambil gambar barcode');
+    }
+  };
+
+  const downloadQRCodeImage = (guest: GeneratedGuest) => {
+    const canvas = document.querySelector(`div[data-qr-id="${guest.id}"] canvas`) as HTMLCanvasElement;
+    if (canvas) {
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/png');
+      link.download = `qrcode_${guest.name.replace(/\s+/g, '_')}.png`;
+      link.click();
+    } else {
+      toast.error('Gagal mengambil gambar QR Code');
     }
   };
 
@@ -247,17 +261,29 @@ export function GuestGenerator() {
                 {/* QR Code Display */}
                 <div className="mb-4 bg-gray-50 p-3 rounded-lg">
                   <p className="text-xs text-gray-600 mb-2 text-center">QR Code:</p>
-                  <QRCodeDisplay value={guest.barcode_data} size={150} />
+                  <div data-qr-id={guest.id} className="flex justify-center">
+                    <QRCodeDisplay value={guest.barcode_data} size={150} />
+                  </div>
                 </div>
 
-                <Button
-                  onClick={() => downloadBarcodeImage(guest)}
-                  variant="outline"
-                  className="w-full text-xs"
-                >
-                  <Download className="w-3 h-3 mr-1" />
-                  Download
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => downloadBarcodeImage(guest)}
+                    variant="outline"
+                    className="flex-1 text-xs px-2"
+                  >
+                    <Download className="w-3 h-3 mr-1" />
+                    Barcode
+                  </Button>
+                  <Button
+                    onClick={() => downloadQRCodeImage(guest)}
+                    variant="outline"
+                    className="flex-1 text-xs px-2"
+                  >
+                    <Download className="w-3 h-3 mr-1" />
+                    QR Code
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
